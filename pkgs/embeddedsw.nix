@@ -187,4 +187,19 @@ in
       maintainer = with maintainers; [ chuangzhu ];
     };
   };
+
+  versal2-plm = mkEmbeddedswApp {
+    template = "versal_plm";
+    proc = "psx_pmc_0";
+    postPatch = ''
+      substituteInPlace cmake/toolchainfiles/microblaze-pmu_toolchain.cmake --replace-fail mb- ${stdenv.cc.targetPrefix}
+    '';
+    meta = with lib; {
+      description = "Versal AI Edge Gen 2 Platform Loader and Manager firmware";
+      homepage = "https://xilinx-wiki.atlassian.net/wiki/spaces/A/pages/2037088327/Versal+Platform+Loader+and+Manager";
+      license = licenses.mit;
+      platforms = [ "microblazeel-none" ];
+      maintainer = with maintainers; [ chuangzhu ];
+    };
+  };
 }

@@ -12,6 +12,14 @@ let
       "2025.1" = "2025.01";
     }
     .${xlnxVersion};
+
+  defconfig =
+    {
+      zynq = "xilinx_zynq_virt_defconfig";
+      zynqmp = "xilinx_zynqmp_virt_defconfig";
+      versal2 = "amd_versal2_virt_defconfig";
+    }
+    .${platform};
 in
 
 buildUBoot {
@@ -34,7 +42,7 @@ buildUBoot {
       .${xlnxVersion};
   };
 
-  defconfig = "xilinx_${platform}_virt_defconfig";
+  inherit defconfig;
   extraMeta.platforms = if platform == "zynq" then [ "armv7l-linux" ] else [ "aarch64-linux" ];
 
   filesToInstall = [ "u-boot.elf" ];

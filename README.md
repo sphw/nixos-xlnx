@@ -1,6 +1,6 @@
 # nixos-xlnx
 
-NixOS and Nix packages for Xilinx Zynq 7000 SoCs and Zynq UltraScale+ MPSoCs. It's like PetaLinux, but instead of Yocto/OpenEmbedded/BitBake, it uses NixOS/Nixpkgs/Nix.
+NixOS and Nix packages for Xilinx Zynq 7000 SoCs, Zynq UltraScale+ MPSoCs, and Versal AI Edge Gen 2 (Versal Series Gen 2, e.g. VEK385). It's like PetaLinux, but instead of Yocto/OpenEmbedded/BitBake, it uses NixOS/Nixpkgs/Nix.
 
 Status: **BETA**. Breaking changes will be documented in [CHANGELOG.md](./CHANGELOG.md).
 
@@ -35,7 +35,7 @@ After finishing your hardware design in Vivado, choose `File > Export > Export H
 ```bash
 git clone https://github.com/Xilinx/device-tree-xlnx ~/.cache/device-tree-xlnx -b xilinx_v2024.1 --depth 1
 source /installation/path/to/Vivado/2024.1/settings64.sh
-./scripts/gendt.tcl vivado_exported.xsa ./output/directory/ -platform zynqmp  # Or "zynq" for Zynq 7000
+./scripts/gendt.tcl vivado_exported.xsa ./output/directory/ -platform zynqmp  # Or "zynq", or "versal2" for Versal AI Edge Gen 2
 ```
 
 Assuming you have [Nix flakes](https://wiki.nixos.org/wiki/Flakes) enabled, configure NixOS as follows:
@@ -52,10 +52,10 @@ Assuming you have [Nix flakes](https://wiki.nixos.org/wiki/Flakes) enabled, conf
         ({ pkgs, lib, config, ... }: {
           nixpkgs.hostPlatform = "aarch64-linux";  # Or "armv7l-linux" for Zynq 7000
           # nixpkgs.buildPlatform = "x86_64-linux";
-          hardware.zynq = {
+          hardware.xlnx = {
             xlnxVersion = "2024.1";  # Or "2025.1"
-            platform = "zynqmp";  # Or "zynq" for Zynq 7000
-            bitstream = ./output/directory/sdt/vivado_exported.bit;
+            platform = "zynqmp";  # Or "zynq" for Zynq 7000, "versal2" for Versal AI Edge Gen 2
+            bitstream = ./output/directory/sdt/vivado_exported.bit;  # .pdi on versal2
             sdtDir = ./output/directory/sdt;
             dtDir = ./output/directory/dt;
           };
@@ -83,7 +83,7 @@ Vivado only knows your PL/PS configuration *inside the SoC*. Therefore, the gene
 ```c
 /dts-v1/;
 /plugin/;  // Required
-/ { compatible = "xlnx,zynqmp"; };  // Required, or "xlnx,zynq-7000"
+/ { compatible = "xlnx,zynqmp"; };  // Required, or "xlnx,zynq-7000", or "xlnx,versal-2ve-2vm" for Versal Gen 2
 // ... Your overrides
 ```
 
@@ -249,16 +249,16 @@ boot.kernelPatches = [
 
 ## Customizing BOOT.BIN
 
-The BIF passed to `bootgen` is built from `hardware.zynq.bif.entries`: a list of `{ attributes, value }` records.
+The BIF passed to `bootgen` is built from `hardware.xlnx.bif.entries`: a list of `{ attributes, value }` records.
 Each record renders as `[attr1, attr2] value`.
-The default includes FSBL, PMUFW, bitstream, BL31, dtb, U-Boot (Zynq 7000 omits PMUFW and BL31).
+The default includes FSBL, PMUFW, bitstream, BL31, dtb, U-Boot (Zynq 7000 omits PMUFW and BL31; Versal Gen 2 omits FSBL/PMUFW and uses a single PLM image instead).
 
 To append entries without redefining the platform default (e.g. an OP-TEE BL32):
 
 ```nix
 { options, pkgs, ... }:
 {
-  hardware.zynq.bif.entries = options.hardware.zynq.bif.entries.default ++ [
+  hardware.xlnx.bif.entries = options.hardware.xlnx.bif.entries.default ++ [
     {
       attributes = [
         "destination_cpu=a53-0"
@@ -274,12 +274,13 @@ To append entries without redefining the platform default (e.g. an OP-TEE BL32):
 For encrypted/authenticated boot, redefine the list to include secure boot related attributes according to the [AMD/Xilinx Bootgen User Guide](https://docs.amd.com/r/en-US/ug1283-bootgen-user-guide). To keep secret AES/RSA keys out of the Nix store, build only the BIF and call `bootgen` manually:
 
 ```bash
-nix build .#nixosConfigurations.<hostname>.config.hardware.zynq.bif.file
+nix build .#nixosConfigurations.<hostname>.config.hardware.xlnx.bif.file
 nix shell github:chuangzhu/nixos-xlnx#xlnx2024_1.xilinx-bootgen_2024_1
 bootgen -image ./result -arch zynqmp -p xczu9eg -encrypt efuse -w -o BOOT.BIN
+# For Versal Gen 2: -arch versal_2ve_2vm
 ```
 
-Then you can set `hardware.zynq.boot-bin = ./BOOT.BIN;`.
+Then you can set `hardware.xlnx.boot-bin = ./BOOT.BIN;`.
 
 See the [AMD/Xilinx Bootgen User Guide](https://docs.amd.com/r/en-US/ug1283-bootgen-user-guide) for the full BIF syntax and key-management options.
 

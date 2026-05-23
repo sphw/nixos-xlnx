@@ -6,7 +6,7 @@
 }:
 
 let
-  cfg = config.hardware.zynq;
+  cfg = config.hardware.xlnx;
 
   # embeddedsw/cmake/toolchainfiles/cortexa9_toolchain.cmake
   fsblCross =
@@ -24,7 +24,7 @@ let
             float-abi = "hard";
           };
         };
-        overlays = [ (import ./overlay.nix { inherit (config.hardware.zynq) xlnxVersion; }) ];
+        overlays = [ (import ./overlay.nix { inherit (config.hardware.xlnx) xlnxVersion; }) ];
       };
 
   bifEntryType = lib.types.submodule {
@@ -67,14 +67,17 @@ let
 in
 
 {
-  options.hardware.zynq = {
+  options.hardware.xlnx = {
     platform = lib.mkOption {
       type = lib.types.enum [
         "zynq"
         "zynqmp"
+        "versal2"
       ];
       description = ''
-        Whether you use Zynq 7000 or Zynq UltraScale+ MPSoC.
+        Which Xilinx/AMD platform to target: Zynq 7000 (`zynq`),
+        Zynq UltraScale+ MPSoC (`zynqmp`), or Versal AI Edge Gen 2
+        / Versal Series Gen 2 (`versal2`, e.g. the VEK385 board).
       '';
     };
 
@@ -99,7 +102,7 @@ in
     };
     dtb = lib.mkOption {
       type = lib.types.path;
-      defaultText = lib.literalMD "built from {option}`hardware.zynq.dtDir`";
+      defaultText = lib.literalMD "built from {option}`hardware.xlnx.dtDir`";
       default = pkgs.runCommandCC "system.dtb" { nativeBuildInputs = [ pkgs.dtc ]; } ''
         ${pkgs.stdenv.cc.targetPrefix}cpp -nostdinc -undef -x assembler-with-cpp ${cfg.dtDir}/system-top.dts -isystem ${cfg.dtDir}/include -o combined.dts
         dtc -@ -I dts -O dtb combined.dts -o $out
@@ -121,18 +124,23 @@ in
       '';
     };
     fsbl = lib.mkOption {
-      type = lib.types.path;
-      defaultText = lib.literalMD "generated from {option}`hardware.zynq.sdtDir`";
+      type = lib.types.nullOr lib.types.path;
+      defaultText = lib.literalMD "generated from {option}`hardware.xlnx.sdtDir` on zynq/zynqmp; `null` on versal2";
       default =
-        fsblCross."${cfg.platform}-fsbl".override { inherit (cfg) sdtDir; } + "/${cfg.platform}_fsbl.elf";
+        if cfg.platform == "versal2" then
+          null
+        else
+          fsblCross."${cfg.platform}-fsbl".override { inherit (cfg) sdtDir; } + "/${cfg.platform}_fsbl.elf";
       example = lib.literalExpression "./firmware/fsbl_a53.elf";
       description = ''
-        Path to First Stage Boot Loader.
+        Path to First Stage Boot Loader. Not used on Versal Gen 2 —
+        the PLM (see {option}`hardware.xlnx.plm`) replaces FSBL and
+        PMUFW in a single firmware image.
       '';
     };
     pmufw = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
-      defaultText = lib.literalMD "generated from {option}`hardware.zynq.sdtDir`";
+      defaultText = lib.literalMD "generated from {option}`hardware.xlnx.sdtDir`";
       default =
         if cfg.platform == "zynqmp" then
           pkgs.pkgsCross.microblaze-embedded.zynqmp-pmufw.override { inherit (cfg) sdtDir; }
@@ -142,6 +150,22 @@ in
       example = lib.literalExpression "./firmware/pmufw.elf";
       description = ''
         Path to Zynq MPSoC Platform Management Unit Firmware.
+      '';
+    };
+    plm = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      defaultText = lib.literalMD "generated from {option}`hardware.xlnx.sdtDir` on versal2";
+      default =
+        if cfg.platform == "versal2" then
+          pkgs.pkgsCross.microblaze-embedded.versal2-plm.override { inherit (cfg) sdtDir; }
+          + "/versal_plm.elf"
+        else
+          null;
+      example = lib.literalExpression "./firmware/versal_plm.elf";
+      description = ''
+        Path to the Versal Platform Loader and Manager firmware
+        (MicroBlaze image running on the PMC PPU). Only used on
+        Versal Gen 2; subsumes FSBL and PMUFW from the ZynqMP era.
       '';
     };
 
@@ -213,13 +237,48 @@ in
                 value = dtb;
               }
             ];
+            versal2 = [
+              {
+                attributes = [
+                  "bootloader"
+                  "destination_cpu=pmc"
+                ];
+                value = cfg.plm;
+              }
+              {
+                attributes = [ "destination_device=pl" ];
+                value = cfg.bitstream;
+              }
+              {
+                attributes = [
+                  "destination_cpu=a78-0"
+                  "exception_level=el-3"
+                  "trustzone"
+                ];
+                value = "${pkgs.armTrustedFirmwareVersal2}/bl31.elf";
+              }
+              {
+                attributes = [
+                  "destination_cpu=a78-0"
+                  "load=0x00100000"
+                ];
+                value = dtb;
+              }
+              {
+                attributes = [
+                  "destination_cpu=a78-0"
+                  "exception_level=el-2"
+                ];
+                value = "${pkgs.ubootVersal2}/u-boot.elf";
+              }
+            ];
           }
           .${cfg.platform};
         defaultText = lib.literalMD ''
           Platform-specific list of FSBL, PMUFW, bitstream, ATF, U-Boot, and dtb entries.
         '';
         example = lib.literalExpression ''
-          options.hardware.zynq.bif.entries.default ++ [
+          options.hardware.xlnx.bif.entries.default ++ [
             {
               attributes = [
                 "destination_cpu=a53-0"
@@ -239,8 +298,8 @@ in
       text = lib.mkOption {
         type = lib.types.str;
         defaultText = lib.literalMD ''
-          Built from {option}`hardware.zynq.bif.imageName` and
-          {option}`hardware.zynq.bif.entries`.
+          Built from {option}`hardware.xlnx.bif.imageName` and
+          {option}`hardware.xlnx.bif.entries`.
         '';
         description = ''
           The full BIF text passed to bootgen. Override directly for full
@@ -251,7 +310,7 @@ in
       file = lib.mkOption {
         type = lib.types.path;
         defaultText = lib.literalMD ''
-          {option}`hardware.zynq.bif.text` written to a file in the Nix store.
+          {option}`hardware.xlnx.bif.text` written to a file in the Nix store.
         '';
         description = ''
           The BIF written out as a file. Useful for invoking `bootgen`
@@ -259,7 +318,7 @@ in
           should not end up world-readable in `/nix/store`:
 
           ```
-          nix build .#nixosConfigurations.<hostname>.config.hardware.zynq.bif.file
+          nix build .#nixosConfigurations.<hostname>.config.hardware.xlnx.bif.file
           bootgen -image ./result -arch zynqmp -p xczu9eg -encrypt efuse -w -o BOOT.BIN
           ```
         '';
@@ -268,10 +327,10 @@ in
 
     boot-bin = lib.mkOption {
       type = lib.types.path;
-      defaultText = lib.literalMD "built by bootgen from {option}`hardware.zynq.bif.file`";
+      defaultText = lib.literalMD "built by bootgen from {option}`hardware.xlnx.bif.file`";
       description = ''
         You can build BOOT.BIN without building the whole system using
-        {command}`nix build .#nixosConfigurations.<hostname>.config.hardware.zynq.boot-bin`
+        {command}`nix build .#nixosConfigurations.<hostname>.config.hardware.xlnx.boot-bin`
       '';
     };
   };
@@ -280,22 +339,40 @@ in
     assertions = [
       {
         assertion = cfg.platform == "zynqmp" -> cfg.pmufw != null;
-        message = "hardware.zynq.pmufw is not optional on ZynqMP.";
+        message = "hardware.xlnx.pmufw is not optional on ZynqMP.";
+      }
+      {
+        assertion = cfg.platform != "versal2" -> cfg.fsbl != null;
+        message = "hardware.xlnx.fsbl is not optional on Zynq/ZynqMP.";
+      }
+      {
+        assertion = cfg.platform == "versal2" -> cfg.plm != null;
+        message = "hardware.xlnx.plm is not optional on Versal Gen 2.";
       }
     ];
 
-    hardware.zynq.bif.text = lib.mkDefault ''
+    hardware.xlnx.bif.text = lib.mkDefault ''
       ${cfg.bif.imageName}: {
       ${lib.concatMapStringsSep "\n" (l: "  ${l}") (map renderBifEntry cfg.bif.entries)}
       }
     '';
 
-    hardware.zynq.bif.file = lib.mkDefault (pkgs.writeText "bootgen.bif" cfg.bif.text);
+    hardware.xlnx.bif.file = lib.mkDefault (pkgs.writeText "bootgen.bif" cfg.bif.text);
 
-    hardware.zynq.boot-bin = lib.mkDefault (
-      pkgs.runCommand "BOOT.BIN" { nativeBuildInputs = [ pkgs."xilinx-bootgen_${lib.replaceString "." "_" cfg.xlnxVersion}" ]; } ''
-        bootgen -image ${cfg.bif.file} -arch ${cfg.platform} -w -o $out
-      ''
-    );
+    hardware.xlnx.boot-bin =
+      let
+        bootgenArch =
+          {
+            zynq = "zynq";
+            zynqmp = "zynqmp";
+            versal2 = "versal_2ve_2vm";
+          }
+          .${cfg.platform};
+      in
+      lib.mkDefault (
+        pkgs.runCommand "BOOT.BIN" { nativeBuildInputs = [ pkgs."xilinx-bootgen_${lib.replaceString "." "_" cfg.xlnxVersion}" ]; } ''
+          bootgen -image ${cfg.bif.file} -arch ${bootgenArch} -w -o $out
+        ''
+      );
   };
 }

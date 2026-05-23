@@ -6,9 +6,12 @@
 }:
 
 {
-  imports = [ ./boot-bin.nix ];
+  imports = [
+    ./boot-bin.nix
+    ./compat.nix
+  ];
 
-  options.hardware.zynq = {
+  options.hardware.xlnx = {
     xlnxVersion = lib.mkOption {
       type = lib.types.enum [
         "2024.1"
@@ -28,22 +31,23 @@
 
     nixpkgs.overlays = [
       (import ./overlay.nix {
-        inherit (config.hardware.zynq) xlnxVersion;
+        inherit (config.hardware.xlnx) xlnxVersion;
       })
     ];
 
-    boot.kernelPackages = lib.mkDefault pkgs."linuxPackages_${config.hardware.zynq.platform}";
+    boot.kernelPackages = lib.mkDefault pkgs."linuxPackages_${config.hardware.xlnx.platform}";
 
-    boot.kernelParams = lib.mkDefault [
-      "earlycon"
-      "console=ttyPS0,115200n8"
-    ];
+    boot.kernelParams = lib.mkDefault (
+      [ "earlycon" ]
+      ++ lib.optional (config.hardware.xlnx.platform == "versal2") "console=ttyAMA0,115200n8"
+      ++ lib.optional (config.hardware.xlnx.platform != "versal2") "console=ttyPS0,115200n8"
+    );
 
     hardware.deviceTree = {
       enable = true;
       dtbSource = pkgs.runCommand "dtb-source" { } ''
         mkdir $out/
-        cp ${config.hardware.zynq.dtb} $out/system.dtb
+        cp ${config.hardware.xlnx.dtb} $out/system.dtb
       '';
       # If not specified, U-Boot uses the non-existent ${dtbSource}/xilinx/zynqmp.dtb
       name = "system.dtb";
@@ -78,7 +82,7 @@
       "hid_microsoft"
       "hid_cherry"
     ]
-    ++ lib.optionals (config.hardware.zynq.platform != "zynq") [
+    ++ lib.optionals (config.hardware.xlnx.platform != "zynq") [
       "xhci_hcd"
       "xhci_pci"
       # Broadcom

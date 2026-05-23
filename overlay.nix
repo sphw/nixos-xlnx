@@ -7,6 +7,7 @@ final: prev: {
     zynqmp-fsbl
     zynqmp-pmufw
     zynq-fsbl
+    versal2-plm
     ;
   ubootZynqMP = prev.callPackage ./pkgs/u-boot-xlnx.nix {
     inherit xlnxVersion;
@@ -16,8 +17,16 @@ final: prev: {
     inherit xlnxVersion;
     platform = "zynq";
   };
+  ubootVersal2 = prev.callPackage ./pkgs/u-boot-xlnx.nix {
+    inherit xlnxVersion;
+    platform = "versal2";
+  };
   armTrustedFirmwareZynqMP = prev.callPackage ./pkgs/arm-trusted-firmware-xlnx.nix {
     inherit xlnxVersion;
+  };
+  armTrustedFirmwareVersal2 = prev.callPackage ./pkgs/arm-trusted-firmware-xlnx.nix {
+    inherit xlnxVersion;
+    platform = "versal2";
   };
   linux_zynqmp = prev.callPackage ./pkgs/linux-xlnx {
     inherit xlnxVersion;
@@ -29,8 +38,14 @@ final: prev: {
     defconfig = "xilinx_zynq_defconfig";
     kernelPatches = [ ];
   };
+  linux_versal2 = prev.callPackage ./pkgs/linux-xlnx {
+    inherit xlnxVersion;
+    defconfig = "xilinx_defconfig";
+    kernelPatches = [ ];
+  };
   linuxPackages_zynqmp = (prev.linuxKernel.packagesFor final.linux_zynqmp).extend final.xlnxExtraLinuxPackages;
   linuxPackages_zynq = (prev.linuxKernel.packagesFor final.linux_zynq).extend final.xlnxExtraLinuxPackages;
+  linuxPackages_versal2 = (prev.linuxKernel.packagesFor final.linux_versal2).extend final.xlnxExtraLinuxPackages;
 
   xlnxExtraLinuxPackages = kfinal: kprev: {
     xlnx-hdmi-modules = kprev.callPackage ./pkgs/hdmi-modules.nix { };
