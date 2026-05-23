@@ -41,8 +41,10 @@ if {$platform == "zynqmp"} {
 	set arch "psu_cortexa53_0"
 } elseif {$platform == "zynq"} {
 	set arch "ps7_cortexa9_0"
+} elseif {$platform == "versal2"} {
+	set arch "psx_cortexa78_0"
 } else {
-	puts "Platform should be either zynq or zynqmp!"
+	puts "Platform should be one of zynq, zynqmp, versal2!"
 }
 
 if {$::tcl_platform(platform) == "windows"} {

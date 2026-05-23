@@ -1,6 +1,6 @@
 # nixos-xlnx
 
-NixOS and Nix packages for Xilinx Zynq 7000 SoCs and Zynq UltraScale+ MPSoCs. It's like PetaLinux, but instead of Yocto/OpenEmbedded/BitBake, it uses NixOS/Nixpkgs/Nix.
+NixOS and Nix packages for Xilinx Zynq 7000 SoCs, Zynq UltraScale+ MPSoCs, and Versal AI Edge Gen 2 (Versal Series Gen 2, e.g. VEK385). It's like PetaLinux, but instead of Yocto/OpenEmbedded/BitBake, it uses NixOS/Nixpkgs/Nix.
 
 Status: **BETA**. Breaking changes will be documented in [CHANGELOG.md](./CHANGELOG.md).
 
@@ -35,7 +35,7 @@ After finishing your hardware design in Vivado, choose `File > Export > Export H
 ```bash
 git clone https://github.com/Xilinx/device-tree-xlnx ~/.cache/device-tree-xlnx -b xilinx_v2024.1 --depth 1
 source /installation/path/to/Vivado/2024.1/settings64.sh
-./scripts/gendt.tcl vivado_exported.xsa ./output/directory/ -platform zynqmp  # Or "zynq" for Zynq 7000
+./scripts/gendt.tcl vivado_exported.xsa ./output/directory/ -platform zynqmp  # Or "zynq", or "versal2" for Versal AI Edge Gen 2
 ```
 
 Assuming you have [Nix flakes](https://wiki.nixos.org/wiki/Flakes) enabled, configure NixOS as follows:
@@ -52,10 +52,10 @@ Assuming you have [Nix flakes](https://wiki.nixos.org/wiki/Flakes) enabled, conf
         ({ pkgs, lib, config, ... }: {
           nixpkgs.hostPlatform = "aarch64-linux";  # Or "armv7l-linux" for Zynq 7000
           # nixpkgs.buildPlatform = "x86_64-linux";
-          hardware.zynq = {
+          hardware.xlnx = {
             xlnxVersion = "2024.1";  # Or "2025.1"
-            platform = "zynqmp";  # Or "zynq" for Zynq 7000
-            bitstream = ./output/directory/sdt/vivado_exported.bit;
+            platform = "zynqmp";  # Or "zynq" for Zynq 7000, "versal2" for Versal AI Edge Gen 2
+            bitstream = ./output/directory/sdt/vivado_exported.bit;  # .pdi on versal2
             sdtDir = ./output/directory/sdt;
             dtDir = ./output/directory/dt;
           };
@@ -83,7 +83,7 @@ Vivado only knows your PL/PS configuration *inside the SoC*. Therefore, the gene
 ```c
 /dts-v1/;
 /plugin/;  // Required
-/ { compatible = "xlnx,zynqmp"; };  // Required, or "xlnx,zynq-7000"
+/ { compatible = "xlnx,zynqmp"; };  // Required, or "xlnx,zynq-7000", or "xlnx,versal-2ve-2vm" for Versal Gen 2
 // ... Your overrides
 ```
 
@@ -91,6 +91,74 @@ Vivado only knows your PL/PS configuration *inside the SoC*. Therefore, the gene
 nix build .#nixosConfigurations.zynqmpboard.config.system.build.sdImage -vL
 zstdcat ./result/nixos-sd-image-24.05.20231222.6df37dc-aarch64-linux.img.zst | sudo dd of=/dev/mmcblk0 status=progress
 ```
+
+## Testing under QEMU (Versal Gen 2)
+
+You can boot the same kernel/U-Boot/BL31 chain under QEMU without
+involving Vivado or real silicon. This is useful for smoke-testing
+the NixOS rootfs, validating kernel modules, and iterating on the
+boot chain before flashing a real board.
+
+Three entry points are provided as Nix-flake `packages`:
+
+| Entry point | Machine | QEMU source | When to pick it |
+|---|---|---|---|
+| `qemu-versal2-upstream`   | `amd-versal2-virt`   | system `qemu` ≥ 10.2 | Quickest, smallest dependency footprint |
+| `qemu-versal2-downstream` | `arm-generic-fdt`    | `pkgs.qemu-xlnx` (compiled from `Xilinx/qemu`) | UART works end-to-end |
+| `qemu-versal2-multiarch`  | `arm-generic-fdt` + PMC/ASU sub-QEMUs | `pkgs.qemu-xlnx-multiarch` | Full PLM/PMC chain from a real `BOOT.BIN` |
+
+See [`examples/versal2-qemu`](./examples/versal2-qemu/) for a flake that
+exposes all three. Once configured:
+
+```bash
+cd examples/versal2-qemu
+nix run .#qemu-versal2-upstream
+nix run .#qemu-versal2-downstream
+nix run .#qemu-versal2-multiarch -- --prebuilt-dir ~/vek385-prebuilt
+```
+
+Exit QEMU with `Ctrl-A x` in any case.
+
+### What QEMU consumes vs. real boot
+
+| Stage          | Real silicon (SD/UFS)        | Upstream `amd-versal2-virt`           | Multiarch wrapper                      |
+|----------------|------------------------------|---------------------------------------|----------------------------------------|
+| DDR init / PMC | PLM (in BOOT.BIN)            | Emulated — skip                       | Real PLM driven by sub-QEMU            |
+| PL / AIE       | PDI in BOOT.BIN              | Emulated — skip                       | Driven from prebuilt PDI               |
+| EL3 secure     | BL31 in BOOT.BIN             | `-device loader,...,cpu-num=0`        | Extracted from BOOT.BIN                |
+| EL2 bootloader | U-Boot in BOOT.BIN           | `-device loader`                      | Extracted from BOOT.BIN                |
+| Kernel + DTB   | Loaded by U-Boot from rootfs | `-device loader`                      | systemd-boot from ESP                  |
+| Rootfs         | UFS partition                | initramfs in DDR (or `-drive`)        | `-drive` to the same NixOS disk image  |
+
+### Disk image shape (real UFS *and* multiarch QEMU)
+
+The `nixosModules.versal2-sd-image` module emits a disk image whose
+layout is correct for both QEMU and real Versal2 UFS hardware:
+
+- **4 KiB logical sectors** in the MBR partition table and the FAT
+  filesystem (UFS exposes a 4 KiB block device; with 512-byte FAT
+  U-Boot prints `FAT sector size mismatch (fs=512, dev=4096)`).
+- **EFI System Partition** (MBR type `0xEF`) holding systemd-boot,
+  the kernel, the initrd, and `/loader/entries/nixos.conf`. U-Boot's
+  EFI BootMgr discovers it at `/EFI/BOOT/BOOTAA64.EFI`.
+- **ext4 root** with the rest of the NixOS closure.
+
+The same image flashes to real UFS:
+
+```bash
+nix build .#nixosConfigurations.<host>.config.system.build.sdImage
+zstdcat ./result/sd-image/*.img.zst | sudo dd of=/dev/<ufs> bs=4M status=progress
+```
+
+### Limitations
+
+- **PL / AI Engine workloads can't be tested.** The QEMU model emulates
+  the PS and PMC interfaces but not custom PL designs or the AIE-ML v2
+  tiles. Drivers binding to PL IP will fail to find their hardware.
+- **Boot-mode pins, DDR training, and PMC reset semantics are abstracted
+  away** on the upstream and downstream paths. If a bug only manifests
+  because of those (e.g. a bad PSM config in your SDT), use the
+  multiarch path or test on real silicon.
 
 ## Deploy to running systems
 
@@ -249,16 +317,16 @@ boot.kernelPatches = [
 
 ## Customizing BOOT.BIN
 
-The BIF passed to `bootgen` is built from `hardware.zynq.bif.entries`: a list of `{ attributes, value }` records.
+The BIF passed to `bootgen` is built from `hardware.xlnx.bif.entries`: a list of `{ attributes, value }` records.
 Each record renders as `[attr1, attr2] value`.
-The default includes FSBL, PMUFW, bitstream, BL31, dtb, U-Boot (Zynq 7000 omits PMUFW and BL31).
+The default includes FSBL, PMUFW, bitstream, BL31, dtb, U-Boot (Zynq 7000 omits PMUFW and BL31; Versal Gen 2 omits FSBL/PMUFW and uses a single PLM image instead).
 
 To append entries without redefining the platform default (e.g. an OP-TEE BL32):
 
 ```nix
 { options, pkgs, ... }:
 {
-  hardware.zynq.bif.entries = options.hardware.zynq.bif.entries.default ++ [
+  hardware.xlnx.bif.entries = options.hardware.xlnx.bif.entries.default ++ [
     {
       attributes = [
         "destination_cpu=a53-0"
@@ -274,12 +342,13 @@ To append entries without redefining the platform default (e.g. an OP-TEE BL32):
 For encrypted/authenticated boot, redefine the list to include secure boot related attributes according to the [AMD/Xilinx Bootgen User Guide](https://docs.amd.com/r/en-US/ug1283-bootgen-user-guide). To keep secret AES/RSA keys out of the Nix store, build only the BIF and call `bootgen` manually:
 
 ```bash
-nix build .#nixosConfigurations.<hostname>.config.hardware.zynq.bif.file
+nix build .#nixosConfigurations.<hostname>.config.hardware.xlnx.bif.file
 nix shell github:chuangzhu/nixos-xlnx#xlnx2024_1.xilinx-bootgen_2024_1
 bootgen -image ./result -arch zynqmp -p xczu9eg -encrypt efuse -w -o BOOT.BIN
+# For Versal Gen 2: -arch versal_2ve_2vm
 ```
 
-Then you can set `hardware.zynq.boot-bin = ./BOOT.BIN;`.
+Then you can set `hardware.xlnx.boot-bin = ./BOOT.BIN;`.
 
 See the [AMD/Xilinx Bootgen User Guide](https://docs.amd.com/r/en-US/ug1283-bootgen-user-guide) for the full BIF syntax and key-management options.
 

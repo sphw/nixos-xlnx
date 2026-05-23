@@ -5,6 +5,7 @@
   buildArmTrustedFirmware,
   openssl,
   unfreeIncludeHDCPBlob ? false,
+  platform ? "zynqmp",
   xlnxVersion ? "2025.1",
 }:
 
@@ -13,6 +14,7 @@ let
     {
       "2024.1" = "2.10";
       "2025.1" = "2.12";
+      "2025.2" = "2.12";
     }
     .${xlnxVersion};
 in
@@ -27,11 +29,12 @@ in
       {
         "2024.1" = "sha256-XEFHS2hZWdJEB7b0Zdci/PtNc7csn+zQWljiG9Tx0mM=";
         "2025.1" = "sha256-HIqfsenTlAU+e3SmKfHZNLrPDcUZIWF222Ur0BYS7zc=";
+        "2025.2" = "sha256-fSLsn9R/qonjFbKk0MpRceDIAeqot5guckRUqaGUTYQ=";
       }
       .${xlnxVersion};
   };
   extraMakeFlags = [ "bl31" ];
-  platform = "zynqmp";
+  inherit platform;
   extraMeta.platforms = [ "aarch64-linux" ];
   filesToInstall = [ "build/${platform}/release/bl31/bl31.elf" ];
   platformCanUseHDCPBlob = unfreeIncludeHDCPBlob;
@@ -39,7 +42,7 @@ in
   {
     makeFlags = [
       "bl31"
-      "PLAT=zynqmp"
+      "PLAT=${platform}"
 
       "HOSTCC=$(CC_FOR_BUILD)"
       # "M0_CROSS_COMPILE=${pkgsCross.arm-embedded.stdenv.cc.targetPrefix}"

@@ -19,6 +19,7 @@ let
       # "2023.2" = "6.1.30";
       "2024.1" = "6.6.10";
       "2025.1" = "6.12.60";
+      "2025.2" = "6.12.40";
     }
     .${xlnxVersion} or throwVersion;
 
@@ -42,6 +43,7 @@ buildLinux (
           "2023.2" = "a19da02cf5b44420ec6afb1eef348c21d9e8cda2"; # xlnx_rebase_v6.1_LTS
           "2024.1" = "xlnx_rebase_v6.6_LTS_2024.1";
           "2025.1" = "xlnx_rebase_v6.12_LTS_2025.1_update_merge_6.12.60";
+          "2025.2" = "xlnx_rebase_v6.12_LTS_2025.2";
         }
         .${xlnxVersion};
       hash =
@@ -50,6 +52,7 @@ buildLinux (
           "2023.2" = "sha256-gYZQLauQ/Sa2AnJdLdcWKwfQqDqctmllMDj0Rjz3qm8=";
           "2024.1" = "sha256-tfpNLRtC9OQZfWaLkaGM42bqhLICDPeT5AoE271p3a0=";
           "2025.1" = "sha256-O7gN30s35tVYfhdKaGQ5z1AR19NMsYz5LtrXt8fSgzc=";
+          "2025.2" = "sha256-iDNxrqkjtmsXKBCr8430GjEne9z697cMYGgMrZfop0Q=";
         }
         .${xlnxVersion};
     };
@@ -116,7 +119,10 @@ buildLinux (
         #   # ERROR: modpost: "__aeabi_ldivmod" [drivers/clk/clk-xlnx-clock-wizard.ko] undefined!
         #   { name = "fix-various-xilinx-modules-div64"; patch = ./fix-various-xilinx-modules-div64.patch; }
       ]
-      ++ lib.optionals (lib.versionAtLeast version "6.12.0-xilinx-v2025.1") [
+      ++ lib.optionals (xlnxVersion == "2025.1") [
+        # Only needed on 2025.1 — the fortify fix was folded into the
+        # upstream Xilinx tree by 2025.2, so the patch's hunks no
+        # longer apply there.
         {
           name = "fix-pl_disp-fortify";
           patch = ./2025.1/fix-pl_disp-fortify.patch;
