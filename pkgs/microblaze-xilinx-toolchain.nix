@@ -89,10 +89,11 @@ lib.optionalAttrs prev.stdenv.targetPlatform.isMicroBlaze {
   # apply as authored. nixpkgs' 4.5.0 restructured libgloss from recursive
   # Makefile.in to flat Makefile.inc, which the patches (0004/0011) don't match.
   # We drop nixpkgs' mips-only libgloss patch (irrelevant to microblaze) and
-  # swap --enable-newlib-reent-check-verify for AMD's --disable. Built by
-  # gccWithoutTargetLibc (which stays gcc 14, keyed off default-gcc-version) —
-  # fine, these are source patches; the codegen that matters for the PLM is the
-  # final cross gcc below.
+  # swap --enable-newlib-reent-check-verify for AMD's --disable. These are the
+  # newlib *source* changes; the compiler that actually emits newlib's object
+  # code is overridden separately (see gccWithoutTargetLibc below) — its codegen
+  # matters just as much as the final cross gcc's, because newlib's compiled
+  # str*/mem* routines are linked straight into the PLM.
   newlib = prev.newlib.overrideAttrs (o: {
     version = "4.4.0.20231231";
     src = prev.fetchurl {
@@ -117,6 +118,29 @@ lib.optionalAttrs prev.stdenv.targetPlatform.isMicroBlaze {
       ];
     };
   });
+
+  # The compiler that builds newlib (above). newlib is compiled by
+  # `stdenvNoLibc` -> `gccCrossLibcStdenv` -> `buildPackages.gccWithoutTargetLibc`,
+  # which nixpkgs pins to `default-gcc-version` (gcc 14) and which gets NONE of
+  # the MicroBlaze backend patches below. The result: newlib's object code
+  # (notably libc/machine/microblaze/strlen.c + the mem*/str* routines) is
+  # emitted by the *unpatched* gcc 14 and linked into the PLM — the PLM then
+  # hangs a few characters into its banner at the first %s print (strlen + a
+  # tight output loop), exactly the miscompile this overlay exists to avoid.
+  # (Confirmed via DWARF DW_AT_producer: 8 newlib TUs came out "GNU C17 14.3.0".)
+  # Rebuild gccWithoutTargetLibc on the same patched gcc 13.4.0 as the final
+  # compiler: reuse its existing gccFun args, swap the version 14 -> 13, add the
+  # backend patches, and re-wrap with the no-libc bintools.
+  gccWithoutTargetLibc = prev.wrapCCWith {
+    cc = (prev.gccWithoutTargetLibc.cc.override {
+      majorMinorVersion = "13";
+    }).overrideAttrs (o: {
+      patches = (o.patches or [ ]) ++ gccPatches;
+    });
+    bintools = final.binutilsNoLibc;
+    libc = final.binutilsNoLibc.libc;
+    extraPackages = [ ];
+  };
 
   # binutils + AMD's MicroBlaze patch set, built from the *exact* tree AMD/poky
   # use: the sourceware binutils-gdb git at branch binutils-2_42-branch, SRCREV
