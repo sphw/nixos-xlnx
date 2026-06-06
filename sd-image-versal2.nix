@@ -233,8 +233,13 @@ in
         name = "xlnx-firmware-update";
         text = ''
           systemctl start boot-firmware.mount
-          cp ${cfg.boot-bin} /boot/firmware/BOOT.BIN
-          sync /boot/firmware/BOOT.BIN
+          # Write to a temp name and atomically rename so an interrupted copy
+          # can't leave a truncated BOOT.BIN — which the BootROM cannot load,
+          # bricking the board to JTAG-only recovery.
+          install -m 0644 ${cfg.boot-bin} /boot/firmware/BOOT.BIN.new
+          sync /boot/firmware/BOOT.BIN.new
+          mv -f /boot/firmware/BOOT.BIN.new /boot/firmware/BOOT.BIN
+          sync
         '';
       }
     );
