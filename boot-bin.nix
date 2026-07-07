@@ -102,18 +102,12 @@ let
   renderPartition =
     p:
     let
-      attrLines =
-        if p.attributes == null then
-          [ ]
-        else
-          map (a: "    ${a}") p.attributes;
+      attrLines = if p.attributes == null then [ ] else map (a: "    ${a}") p.attributes;
       lines = attrLines ++ [ "    file = ${p.value}" ];
     in
     "  partition\n  {\n${lib.concatStringsSep "\n" lines}\n  }";
 
-  renderImage =
-    im:
-    ''
+  renderImage = im: ''
       image
       {
         name = ${im.name}
@@ -123,7 +117,10 @@ let
 in
 
 {
-  imports = [ ./versal2-boot-image.nix ];
+  imports = [
+    ./sdt.nix
+    ./versal2-boot-image.nix
+  ];
 
   options.hardware.xlnx = {
     bootBin.enable = lib.mkOption {
@@ -237,9 +234,18 @@ in
     };
     plm = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
-      defaultText = lib.literalMD "generated from {option}`hardware.xlnx.sdtDir` on versal2, or `null` if `sdtDir` is `null`";
+      defaultText = lib.literalMD "generated from {option}`hardware.xlnx.sdtDir` on versal2 (via the lopper-pruned PMC view when {option}`hardware.xlnx.sdt.enable`), or `null` if `sdtDir` is `null`";
       default =
-        if cfg.platform == "versal2" && cfg.sdtDir != null then
+        # With the SDT pipeline active, feed the PLM the lopper-pruned PMC
+        # view (embeddedsw's create_bsp.py wants a single-processor SDT and
+        # the matching -p label), not the raw multi-processor export.
+        if cfg.platform == "versal2" && cfg.sdt.enable && cfg.sdt.pmcSdtDir != null then
+          pkgs.pkgsCross.microblaze-embedded.versal2-plm.override {
+            sdtDir = cfg.sdt.pmcSdtDir;
+            plmProc = cfg.sdt.pmcProc;
+          }
+          + "/versal_plm.elf"
+        else if cfg.platform == "versal2" && cfg.sdtDir != null then
           pkgs.pkgsCross.microblaze-embedded.versal2-plm.override { inherit (cfg) sdtDir; }
           + "/versal_plm.elf"
         else
@@ -562,9 +568,11 @@ in
       in
       lib.mkIf cfg.bootBin.enable (
         lib.mkDefault (
-          pkgs.runCommand "BOOT.BIN" { nativeBuildInputs = [ pkgs."xilinx-bootgen_${lib.replaceString "." "_" cfg.xlnxVersion}" ]; } ''
-            bootgen -image ${cfg.bif.file} -arch ${bootgenArch} -w -o $out
-          ''
+          pkgs.runCommand "BOOT.BIN"
+            { nativeBuildInputs = [ pkgs."xilinx-bootgen_${lib.replaceString "." "_" cfg.xlnxVersion}" ]; }
+            ''
+              bootgen -image ${cfg.bif.file} -arch ${bootgenArch} -w -o $out
+            ''
         )
       );
   };

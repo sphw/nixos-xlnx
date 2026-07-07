@@ -92,6 +92,32 @@ nix build .#nixosConfigurations.zynqmpboard.config.system.build.sdImage -vL
 zstdcat ./result/nixos-sd-image-24.05.20231222.6df37dc-aarch64-linux.img.zst | sudo dd of=/dev/mmcblk0 status=progress
 ```
 
+## Versal Gen 2: from System Device Tree to image
+
+On `versal2`, setting `hardware.xlnx.sdtDir` to the System Device Tree
+export (`scripts/gendt.tcl` output, or the BSP's `hw-description` SDT)
+activates the lopper pipeline in [`sdt.nix`](./sdt.nix): at build time it
+prunes the multi-processor SDT with lopper's `gen_domain_dts` assist into
+
+* the **Linux domain DT**, which becomes `hardware.xlnx.dtb` — append your
+  board overlays via `hardware.xlnx.sdt.extraDtsi = [ ./system-user.dtsi ]`;
+* the **PMC SDT view**, which feeds the from-source PLM build
+  (`hardware.xlnx.plm`'s default).
+
+No generated device trees need to be committed. The pruned outputs are
+exposed as `system.build.sdtLinuxDts` / `system.build.sdtPmcSdtDir` for
+inspection, and the processor labels / lop files can be tuned via
+`hardware.xlnx.sdt.{linuxProc,pmcProc,linuxLops}` (some SDTs label the PMC
+`psx_pmc_0` instead of the default `pmc_0`).
+
+The proprietary boot blobs (PMC/LPD/FPD CDOs, ASU firmware, `system_pld_*`
+fabric partitions) are not part of the SDT — they come from the
+Vivado/BSP hardware export (`…/pdi_files`). Point
+`hardware.xlnx.versal2.pdiDir` at that directory (or a flat copy of it) and
+the multi-image BOOT.BIN options default themselves by canonical file name,
+searching `.`, `gen_files/`, and `static_files/`. Individual
+`hardware.xlnx.versal2.*` options still override the discovered defaults.
+
 ## Testing under QEMU (Versal Gen 2)
 
 You can boot the same kernel/U-Boot/BL31 chain under QEMU without

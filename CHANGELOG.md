@@ -1,3 +1,17 @@
+## Unreleased
+
+On `versal2`, setting `hardware.xlnx.sdtDir` now activates a lopper-based
+SDT pipeline (`sdt.nix`): the Linux device tree (`hardware.xlnx.dtb`) and
+the PMC SDT view feeding the from-source PLM are derived from the System
+Device Tree at build time (see the new `hardware.xlnx.sdt.*` options), so
+generated device trees no longer need to be committed. Board overlays go in
+`hardware.xlnx.sdt.extraDtsi`.
+
+A new `hardware.xlnx.versal2.pdiDir` option discovers the multi-image
+BOOT.BIN blobs (`pmc_data.cdo`, `lpd_data.cdo`, `fpd_data.cdo`, ASU,
+`system_pld_*`, …) by canonical name from one Vivado/BSP `pdi_files`
+export directory, replacing per-blob option wiring.
+
 ## [20260124.ab3cf41]
 
 [20260124.ab3cf41]: https://github.com/chuangzhu/nixos-xlnx/tree/ab3cf41e0af6485c39bc7b1535850d4d2605ddce
